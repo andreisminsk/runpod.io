@@ -171,7 +171,49 @@ ollama run hf.co/unsloth/gemma-4-31B-it-qat-GGUF:UD-Q4_K_XL
 
 ---
 
+## Ollama & HuggingFace — Format Compatibility
+
+Ollama **cannot** run every model on HuggingFace directly. Only **GGUF-format** models are supported.
+
+### What works directly
+
+Any GGUF model on HuggingFace can be pulled and run with:
+
+```bash
+ollama run hf.co/{username}/{repo}:{quantization}
+```
+
+Example: `ollama run hf.co/unsloth/gemma-4-31B-it-GGUF:Q5_K_M`
+
+There are ~45K GGUF models on HuggingFace that work this way.
+
+### What doesn't work directly
+
+| Format | Direct Ollama support? | Workaround |
+|--------|----------------------|------------|
+| **GGUF** | ✅ Yes | — |
+| **Safetensors** | ❌ No | Convert to GGUF first |
+| **PyTorch `.bin`** | ❌ No | Convert to GGUF first |
+
+Most models on HuggingFace are in **safetensors** format (the native HuggingFace format), which Ollama cannot import directly.
+
+### Converting non-GGUF models for Ollama
+
+1. **Download** the model from HuggingFace (safetensors / PyTorch)
+2. **Convert** to GGUF using `llama.cpp` conversion scripts (e.g., `convert_hf_to_gguf.py`)
+3. **Quantize** (optional) to reduce size
+4. **Create a Modelfile** pointing to the GGUF file and run:
+   ```bash
+   ollama create mymodel -f Modelfile
+   ollama run mymodel
+   ```
+
+> **Tip:** For fine-tuned adapters in safetensors format, you can create a Modelfile with a `FROM` command pointing to the base GGUF model and an `ADAPTER` command pointing to the adapter weights. See [Ollama Import Docs](https://docs.ollama.com/import).
+
+---
+
 ## Links
+>>>>>>> REPLACE`
 
 - [Google Gemma 4 31B IT (base)](https://hf.co/google/gemma-4-31B-it)
 - [Google QAT Q4_0 GGUF](https://hf.co/google/gemma-4-31B-it-qat-q4_0-gguf)
