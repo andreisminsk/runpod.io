@@ -187,6 +187,35 @@ These are exactly the layers that UD-Q8_K_XL **boosts above 8-bit**. So for codi
 
 **Practical advice**: At 8-bit, both are near-lossless. The quality difference is negligible for most use cases. **Q8_0 is the better default** — it's smaller and the quality is already indistinguishable from full precision. Only choose UD-Q8_K_XL if you're chasing every last drop of quality and don't mind the extra ~2 GB.
 
+### Inspection Results: UD-Q8_K_XL Per-Tensor Breakdown
+
+Actual inspection of the GGUF file reveals that UD-Q8_K_XL uses **only two quantization types** — no intermediate K-quants:
+
+| Type | Tensors | Size (GB) | % of Model |
+|------|---------|-----------|------------|
+| Q8_0 | 381 | 27.86 | 85.5% |
+| F16 | 30 | 4.74 | 14.5% |
+| F32 | 422 | 0.005 | ~0% (norms only) |
+
+The F16 boost targets **6 out of 60 layers** — the "bookends" of the transformer:
+
+| Layer | Type | Q | K | V | O | FFN_up | FFN_gate | FFN_down |
+|-------|------|---|---|---|---|--------|----------|----------|
+| 1 | sliding | **F16** | **F16** | Q8_0 | Q8_0 | **F16** | **F16** | **F16** |
+| 52 | sliding | **F16** | **F16** | Q8_0 | Q8_0 | **F16** | **F16** | **F16** |
+| 53 | full | **F16** | **F16** | — | Q8_0 | **F16** | **F16** | **F16** |
+| 57 | sliding | **F16** | **F16** | Q8_0 | Q8_0 | **F16** | **F16** | **F16** |
+| 58 | sliding | **F16** | **F16** | Q8_0 | Q8_0 | **F16** | **F16** | **F16** |
+| 59 | full | **F16** | **F16** | — | Q8_0 | **F16** | **F16** | **F16** |
+| All others | mixed | Q8_0 | Q8_0 | Q8_0 | Q8_0 | Q8_0 | Q8_0 | Q8_0 |
+
+**Key observations:**
+- Layer 1 (early) and layers 52-59 (final 8) get F16 — initial feature extraction and output refinement
+- V and O projections stay Q8_0 even in F16 layers — the imatrix found attention *scoring* (Q, K) and *knowledge transformation* (FFN) benefit more from 16-bit than attention *value aggregation* (V) and *output mixing* (O)
+- The ~2 GB size premium comes entirely from these 30 F16 tensors (4.74 GB vs. ~2.37 GB if they were Q8_0)
+
+**For coding tasks:** UD-Q8_K_XL is the better choice — F16 on Q/K attention scoring improves variable tracking across long contexts, and F16 on final-layer FFN improves syntax generation and reduces API hallucinations. But since 85.5% of the model is identical Q8_0, the practical difference is marginal. If the extra ~2 GB costs you context length or VRAM, Q8_0 is the smarter choice.
+
 ---
 
 ## VRAM Recommendations
