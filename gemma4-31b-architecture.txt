@@ -1,0 +1,43 @@
+Gemma 4 31B Model Architecture & Parameter Flow
+
+The model has a central Embedding layer (262,144 × 5,376 = 1.41B params) that maps token IDs into vectors in ℝ⁵³⁷⁶.
+
+From Embedding, tokens flow through 60 transformer layers split into two types:
+- 50 Sliding Attention Layers (~479M params each, 23.95B total)
+- 10 Full Attention Layers (~534M params each, 5.34B total)
+
+Each Sliding Attention Layer contains:
+- Q projection: 5,376 × 8,192 = 44.0M (ℝ⁵³⁷⁶ → ℝ⁸¹⁹²)
+- K projection: 5,376 × 4,096 = 22.0M (ℝ⁵³⁷⁶ → ℝ⁴⁰⁹⁶)
+- V projection: 5,376 × 4,096 = 22.0M (ℝ⁵³⁷⁶ → ℝ⁴⁰⁹⁶)
+- O projection: 8,192 × 5,376 = 44.0M (ℝ⁸¹⁹² → ℝ⁵³⁷⁶)
+- FFN up: 5,376 × 21,504 = 115.6M (ℝ⁵³⁷⁶ → ℝ²¹⁵⁰⁴)
+- FFN gate: 5,376 × 21,504 = 115.6M (ℝ⁵³⁷⁶ → ℝ²¹⁵⁰⁴)
+- FFN down: 21,504 × 5,376 = 115.6M (ℝ²¹⁵⁰⁴ → ℝ⁵³⁷⁶)
+- Norms: ~0.02M
+
+Each Full Attention Layer contains:
+- Q projection: 5,376 × 16,384 = 88.1M (ℝ⁵³⁷⁶ → ℝ¹⁶³⁸⁴)
+- K projection: 5,376 × 2,048 = 11.0M (ℝ⁵³⁷⁶ → ℝ²⁰⁴⁸)
+- O projection: 16,384 × 5,376 = 88.1M (ℝ¹⁶³⁸⁴ → ℝ⁵³⁷⁶)
+- FFN up: 115.6M
+- FFN gate: 115.6M
+- FFN down: 115.6M
+- Norms: ~0.02M
+
+After the 60 layers, there is a Vision Encoder (mmproj, ~0.55B params) that projects vision features into ℝ⁵³⁷⁶.
+
+Key math facts:
+- All parameters are tensors of rank ≤ 2 (scalars, vectors, matrices)
+- ML 'dimension' = size along one axis, not tensor rank
+- A vector in ℝ⁵³⁷⁶ has 5,376 components (rank 1 tensor)
+- A matrix [5376, 8192] is rank 2, containing 44M scalars
+- Total text model: ~30.7B parameters
+- Total with vision: ~31.25B parameters
+
+Attention details:
+- 32 Q heads, 16 KV heads (sliding), 4 KV heads (full)
+- Sliding head dim: 256, Full head dim: 512
+- Sliding window: 1,024 tokens
+- Context length: 262,144 (256K)
+- FFN expansion: 4× (5,376 → 21,504)
