@@ -130,44 +130,44 @@ By using sliding attention for 83% of layers and full attention only every 6th l
 
 ## Model Dimensions
 
-| Dimension | Value | Math Description |
-|-----------|-------|-----------------|
-| Hidden size (d_model) | 5,376 | Each token is a vector in ℝ⁵³⁷⁶ |
-| FFN intermediate size | 21,504 (4× expansion) | FFN projects tokens into ℝ²¹⁵⁰⁴ then back to ℝ⁵³⁷⁶ |
-| Attention heads (Q) | 32 | Hidden vector split into 32 parallel subspaces |
-| KV heads (sliding) | 16 | 16 key/value subspaces (Grouped Query Attention) |
-| KV heads (full/global) | 4 | 4 global key/value subspaces (unified K/V) |
-| Head dimension (sliding) | 256 | Each attention head operates in ℝ²⁵⁶ |
-| Head dimension (full/global) | 512 | Each global head operates in ℝ⁵¹² |
-| Layers | 60 (50 sliding + 10 full) | 60 sequential rank-2 tensor transformations |
-| Vocabulary size | 262,144 | Embedding maps 262K token IDs → vectors in ℝ⁵³⁷⁶ |
-| Context length | 262,144 (256K) | Maximum sequence length (axis size of the time dimension) |
-| Sliding window | 1,024 | Local attention sees 1,024 tokens back (local ℝ¹⁰²⁴ window) |
+| Dimension | Value | What It Means | Math Description |
+|-----------|-------|--------------|-----------------|
+| Hidden size (d_model) | 5,376 | The "width" of the model — how many numbers represent each token at every layer. Bigger = more expressive but more expensive. | Each token is a vector in ℝ⁵³⁷⁶ |
+| FFN intermediate size | 21,504 (4× expansion) | How wide the feed-forward network expands before compressing back. 4× is standard — the model "thinks harder" in a wider space then compresses. | FFN projects tokens into ℝ²¹⁵⁰⁴ then back to ℝ⁵³⁷⁶ |
+| Attention heads (Q) | 32 | How many parallel attention patterns each layer computes. Each head can focus on different relationships (grammar, meaning, position). | Hidden vector split into 32 parallel subspaces |
+| KV heads (sliding) | 16 | How many key/value representations are shared across query heads. Fewer KV heads = less memory, slightly less precision. | 16 key/value subspaces (Grouped Query Attention) |
+| KV heads (full/global) | 4 | Fewer KV heads for global attention to save memory on long contexts. K and V are unified (no separate V tensor). | 4 global key/value subspaces (unified K/V) |
+| Head dimension (sliding) | 256 | Size of each attention head's subspace. Determines how much detail each head can capture. | Each attention head operates in ℝ²⁵⁶ |
+| Head dimension (full/global) | 512 | Global heads are wider (2×) to compensate for having fewer of them. They need more capacity per head for long-range reasoning. | Each global head operates in ℝ⁵¹² |
+| Layers | 60 (50 sliding + 10 full) | How many times the attention+FFN transformation is applied. More layers = deeper understanding, but slower and more expensive. | 60 sequential rank-2 tensor transformations |
+| Vocabulary size | 262,144 | How many distinct tokens the model knows. Covers text, code, and special tokens. Larger vocab = better for multilingual and code. | Embedding maps 262K token IDs → vectors in ℝ⁵³⁷⁶ |
+| Context length | 262,144 (256K) | Maximum number of tokens the model can process at once. Determines how much text/code you can feed in a single prompt. | Maximum sequence length (axis size of the time dimension) |
+| Sliding window | 1,024 | How many recent tokens each sliding attention layer can see. Local context for syntax and nearby word relationships. | Local attention sees 1,024 tokens back (local ℝ¹⁰²⁴ window) |
 
 ### Per-Layer Parameter Counts
 
-| Component | Sliding Attention Layer | Full Attention Layer | Math Description |
-|-----------|------------------------|---------------------|-----------------|
-| Q projection | 5,376 × 8,192 = 44.0M | 5,376 × 16,384 = 88.1M | Rank-2 tensor, linear map ℝ⁵³⁷⁶ → ℝ⁸¹⁹² (or ℝ¹⁶³⁸⁴) |
-| K projection | 5,376 × 4,096 = 22.0M | 5,376 × 2,048 = 11.0M | Rank-2 tensor, linear map ℝ⁵³⁷⁶ → ℝ⁴⁰⁹⁶ (or ℝ²⁰⁴⁸) |
-| V projection | 5,376 × 4,096 = 22.0M | *(unified with K)* | Rank-2 tensor, linear map ℝ⁵³⁷⁶ → ℝ⁴⁰⁹⁶ |
-| O projection | 8,192 × 5,376 = 44.0M | 16,384 × 5,376 = 88.1M | Rank-2 tensor, linear map ℝ⁸¹⁹² → ℝ⁵³⁷⁶ (or ℝ¹⁶³⁸⁴ → ℝ⁵³⁷⁶) |
-| FFN up | 5,376 × 21,504 = 115.6M | 5,376 × 21,504 = 115.6M | Rank-2 tensor, linear map ℝ⁵³⁷⁶ → ℝ²¹⁵⁰⁴ |
-| FFN gate | 5,376 × 21,504 = 115.6M | 5,376 × 21,504 = 115.6M | Rank-2 tensor, linear map ℝ⁵³⁷⁶ → ℝ²¹⁵⁰⁴ |
-| FFN down | 21,504 × 5,376 = 115.6M | 21,504 × 5,376 = 115.6M | Rank-2 tensor, linear map ℝ²¹⁵⁰⁴ → ℝ⁵³⁷⁶ |
-| Norms + scales | ~0.02M | ~0.02M | Rank-1 tensors (vectors in ℝ⁵³⁷⁶) and rank-0 (scalars) |
-| **Per-layer total** | **~479M** | **~534M** | |
+| Component | What It Does | Sliding Attention Layer | Full Attention Layer | Math Description |
+|-----------|-------------|------------------------|---------------------|-----------------|
+| Q projection | "What am I looking for?" — transforms each token into a query vector for attention | 5,376 × 8,192 = 44.0M | 5,376 × 16,384 = 88.1M | Rank-2 tensor, linear map ℝ⁵³⁷⁶ → ℝ⁸¹⁹² (or ℝ¹⁶³⁸⁴) |
+| K projection | "What do I contain?" — transforms each token into a key vector for matching | 5,376 × 4,096 = 22.0M | 5,376 × 2,048 = 11.0M | Rank-2 tensor, linear map ℝ⁵³⁷⁶ → ℝ⁴⁰⁹⁶ (or ℝ²⁰⁴⁸) |
+| V projection | "What info do I offer?" — transforms each token into a value vector to share | 5,376 × 4,096 = 22.0M | *(unified with K)* | Rank-2 tensor, linear map ℝ⁵³⁷⁶ → ℝ⁴⁰⁹⁶ |
+| O projection | Combines all attention head outputs back into the hidden size | 8,192 × 5,376 = 44.0M | 16,384 × 5,376 = 88.1M | Rank-2 tensor, linear map ℝ⁸¹⁹² → ℝ⁵³⁷⁶ (or ℝ¹⁶³⁸⁴ → ℝ⁵³⁷⁶) |
+| FFN up | Expands token from hidden size into wider space for "thinking" | 5,376 × 21,504 = 115.6M | 5,376 × 21,504 = 115.6M | Rank-2 tensor, linear map ℝ⁵³⁷⁶ → ℝ²¹⁵⁰⁴ |
+| FFN gate | Controls which expanded features to pass through (like a filter/switch) | 5,376 × 21,504 = 115.6M | 5,376 × 21,504 = 115.6M | Rank-2 tensor, linear map ℝ⁵³⁷⁶ → ℝ²¹⁵⁰⁴ |
+| FFN down | Compresses the expanded representation back to hidden size | 21,504 × 5,376 = 115.6M | 21,504 × 5,376 = 115.6M | Rank-2 tensor, linear map ℝ²¹⁵⁰⁴ → ℝ⁵³⁷⁶ |
+| Norms + scales | Stabilizes values and scales outputs between layers | ~0.02M | ~0.02M | Rank-1 tensors (vectors in ℝ⁵³⁷⁶) and rank-0 (scalars) |
+| **Per-layer total** | | **~479M** | **~534M** | |
 
 ### Total Parameter Count
 
-| Component | Calculation | Parameters | Math Description |
-|-----------|-------------|-----------|-----------------|
-| Embedding (tied with output) | 262,144 × 5,376 | 1.41B | Rank-2 tensor, lookup table mapping token IDs → vectors in ℝ⁵³⁷⁶ |
-| 50 sliding attention layers | 50 × 479M | 23.95B | 50 sequential rank-2 transformations per component |
-| 10 full attention layers | 10 × 534M | 5.34B | 10 sequential rank-2 transformations per component |
-| **Text model total** | | **~30.7B** | ~30.7B individual scalars (rank-0 tensors) |
-| Vision encoder (mmproj) | | ~0.55B | Projects vision features into ℝ⁵³⁷⁶ |
-| **Total with vision** | | **~31.25B** | |
+| Component | What It Does | Calculation | Parameters | Math Description |
+|-----------|-------------|-------------|-----------|-----------------|
+| Embedding (tied with output) | Translates between token IDs and vectors — the front door and back door of the model | 262,144 × 5,376 | 1.41B | Rank-2 tensor, lookup table mapping token IDs → vectors in ℝ⁵³⁷⁶ |
+| 50 sliding attention layers | Local context processing — syntax, nearby word relationships | 50 × 479M | 23.95B | 50 sequential rank-2 transformations per component |
+| 10 full attention layers | Long-range context processing — variable tracking, cross-file reasoning | 10 × 534M | 5.34B | 10 sequential rank-2 transformations per component |
+| **Text model total** | | | **~30.7B** | ~30.7B individual scalars (rank-0 tensors) |
+| Vision encoder (mmproj) | Converts image features into the same ℝ⁵³⁷⁶ space as text tokens | | ~0.55B | Projects vision features into ℝ⁵³⁷⁶ |
+| **Total with vision** | | | **~31.25B** | |
 
 ### Tensor Rank Summary
 
@@ -578,9 +578,21 @@ Each token ID is looked up in the **embedding matrix** (a rank-2 tensor of shape
 Token ID 4288 → vector [0.023, -0.137, 0.541, ...]  (5,376 numbers)
 Token ID 452  → vector [-0.089, 0.214, -0.033, ...]  (5,376 numbers)
 ```
-
 At this point, each token is a point in ℝ⁵³⁷⁶ — a 5,376-dimensional space where similar words are close together.
 
+Every number in this matrix is a learned weight (a parameter). The count is simply rows × columns: 262,144 (vocabulary size) × 5,376 (hidden size) = **1.41 billion parameters**. This same pattern (shape `[A × B]` = A × B parameters) applies to every weight matrix in the model, and the total of ~31B parameters is just the sum:
+
+```
+1.41B  (embedding)
++ 50   (layer count) × 479M (per-layer) = 23.95B  (sliding layers)
++ 10   (layer count) × 534M (per-layer) = 5.34B   (full layers)
++ 0.55B  (vision)
+≈ 31B  (total params)
+```
+
+(See [How the Math Scales to 31B](#how-the-math-scales-to-31b) for the full breakdown.)
+
+> **Math reference:**
 > **Math reference:** The embedding is a rank-2 tensor (matrix) — a linear map that takes an integer index and returns a vector in ℝ⁵³⁷⁶. It's a lookup table with 262,144 rows, each row being a rank-1 tensor (vector) with 5,376 components. The result for a sequence of N tokens is a rank-2 tensor of shape `[N × 5,376]`.
 
 ### Step 3: Positional Encoding — Adding "Where" to "What"
