@@ -2,6 +2,165 @@
 
 > Last updated: July 2026
 
+## Model Dimensions
+
+| Dimension | Value | Math Description |
+|-----------|-------|-----------------|
+| Hidden size (d_model) | 5,376 | Each token is a vector in ℝ⁵³⁷⁶ |
+| FFN intermediate size | 21,504 (4× expansion) | FFN projects tokens into ℝ²¹⁵⁰⁴ then back to ℝ⁵³⁷⁶ |
+| Attention heads (Q) | 32 | Hidden vector split into 32 parallel subspaces |
+| KV heads (sliding) | 16 | 16 key/value subspaces (Grouped Query Attention) |
+| KV heads (full/global) | 4 | 4 global key/value subspaces (unified K/V) |
+| Head dimension (sliding) | 256 | Each attention head operates in ℝ²⁵⁶ |
+| Head dimension (full/global) | 512 | Each global head operates in ℝ⁵¹² |
+| Layers | 60 (50 sliding + 10 full) | 60 sequential rank-2 tensor transformations |
+| Vocabulary size | 262,144 | Embedding maps 262K token IDs → vectors in ℝ⁵³⁷⁶ |
+| Context length | 262,144 (256K) | Maximum sequence length (axis size of the time dimension) |
+| Sliding window | 1,024 | Local attention sees 1,024 tokens back (local ℝ¹⁰²⁴ window) |
+
+### Per-Layer Parameter Counts
+
+| Component | Sliding Attention Layer | Full Attention Layer | Math Description |
+|-----------|------------------------|---------------------|-----------------|
+| Q projection | 5,376 × 8,192 = 44.0M | 5,376 × 16,384 = 88.1M | Rank-2 tensor, linear map ℝ⁵³⁷⁶ → ℝ⁸¹⁹² (or ℝ¹⁶³⁸⁴) |
+| K projection | 5,376 × 4,096 = 22.0M | 5,376 × 2,048 = 11.0M | Rank-2 tensor, linear map ℝ⁵³⁷⁶ → ℝ⁴⁰⁹⁶ (or ℝ²⁰⁴⁸) |
+| V projection | 5,376 × 4,096 = 22.0M | *(unified with K)* | Rank-2 tensor, linear map ℝ⁵³⁷⁶ → ℝ⁴⁰⁹⁶ |
+| O projection | 8,192 × 5,376 = 44.0M | 16,384 × 5,376 = 88.1M | Rank-2 tensor, linear map ℝ⁸¹⁹² → ℝ⁵³⁷⁶ (or ℝ¹⁶³⁸⁴ → ℝ⁵³⁷⁶) |
+| FFN up | 5,376 × 21,504 = 115.6M | 5,376 × 21,504 = 115.6M | Rank-2 tensor, linear map ℝ⁵³⁷⁶ → ℝ²¹⁵⁰⁴ |
+| FFN gate | 5,376 × 21,504 = 115.6M | 5,376 × 21,504 = 115.6M | Rank-2 tensor, linear map ℝ⁵³⁷⁶ → ℝ²¹⁵⁰⁴ |
+| FFN down | 21,504 × 5,376 = 115.6M | 21,504 × 5,376 = 115.6M | Rank-2 tensor, linear map ℝ²¹⁵⁰⁴ → ℝ⁵³⁷⁶ |
+| Norms + scales | ~0.02M | ~0.02M | Rank-1 tensors (vectors in ℝ⁵³⁷⁶) and rank-0 (scalars) |
+| **Per-layer total** | **~479M** | **~534M** | |
+
+### Total Parameter Count
+
+| Component | Calculation | Parameters | Math Description |
+|-----------|-------------|-----------|-----------------|
+| Embedding (tied with output) | 262,144 × 5,376 | 1.41B | Rank-2 tensor, lookup table mapping token IDs → vectors in ℝ⁵³⁷⁶ |
+| 50 sliding attention layers | 50 × 479M | 23.95B | 50 sequential rank-2 transformations per component |
+| 10 full attention layers | 10 × 534M | 5.34B | 10 sequential rank-2 transformations per component |
+| **Text model total** | | **~30.7B** | ~30.7B individual scalars (rank-0 tensors) |
+| Vision encoder (mmproj) | | ~0.55B | Projects vision features into ℝ⁵³⁷⁶ |
+| **Total with vision** | | **~31.25B** | |
+
+### Tensor Rank Summary
+
+All learnable parameters in this model are rank ≤ 2:
+
+| Rank | Shape | What it represents | Example |
+|------|-------|--------------------|---------|
+| 0 (scalar) | `[1]` | Single scale value | `layer_output_scale.weight` |
+| 1 (vector) | `[5376]` | Per-channel scale/normalization | `attn_norm.weight`, `ffn_norm.weight` |
+| 2 (matrix) | `[5376, 8192]` | Linear transformation between vector spaces | `attn_q.weight`, `ffn_up.weight` |
+
+**No rank-3 or higher tensors exist in this model.** The largest matrix is the embedding at `[262,144 × 5,376]` containing 1.41B individual scalars. The maximum axis size (ML "dimension") is 262,144 (vocabulary size).
+
+> **Note:** Full attention layers use unified K/V projections (no separate V tensor) and 512-dim heads with 4 global KV heads, making Q and O projections 2× larger than sliding layers. This is why full attention layers have ~55M more parameters each.
+
+---
+
+## Notation Guide: ℝⁿ
+
+Throughout this document, **ℝⁿ** (read: "R-n" or "real n-space") denotes the set of all vectors with **n** real-number components.
+
+- **ℝ** = the set of all real numbers (…, -1.5, 0, 3.14, …)
+- **ℝ³** = all possible 3D vectors: `[x, y, z]` where x, y, z are real numbers
+- **ℝ⁵³⁷⁶** = all possible vectors with 5,376 real-number components
+
+When we say a token is "a vector in ℝ⁵³⁷⁶", it means each token is represented by a list of 5,376 real numbers. A weight matrix that maps ℝ⁵³⁷⁶ → ℝ⁸¹⁹² takes a 5,376-number vector as input and produces an 8,192-number vector as output — it's a function between two vector spaces.
+
+| Notation | Meaning | In this model |
+|----------|---------|---------------|
+| ℝ⁵³⁷⁶ | Vectors with 5,376 components | Token hidden states |
+| ℝ⁸¹⁹² | Vectors with 8,192 components | Query (Q) output space |
+| ℝ²¹⁵⁰⁴ | Vectors with 21,504 components | FFN intermediate space |
+| ℝ²⁶²¹⁴⁴ | Vectors with 262,144 components | Vocabulary (token ID) space |
+
+The superscript is the **dimension of the vector space** — how many numbers each vector contains. This is the math meaning of "dimension" (size of the space), not the tensor rank (number of axes).
+
+### Origin of the ℝⁿ Notation
+
+| Period | Development |
+|--------|-------------|
+| 1637 | Descartes invents Cartesian coordinates — the idea of ℝ² as a plane |
+| 1888 | Peano formally defines vector spaces and ℝⁿ |
+| 1930s–50s | Bourbaki group (French mathematicians) standardizes ℝⁿ notation in their textbooks |
+| 1960s | Blackboard bold ℝ (double-struck) appears on university chalkboards to distinguish the set ℝ from the variable R |
+| 1990s | LaTeX adopts `\mathbb{R}` for the symbol |
+
+- **ℝ** = the set of real numbers, from the German **"Reell"** (real). The double-struck style distinguishes it from a variable named R.
+- **The superscript ⁿ** = Cartesian product. ℝ² = ℝ × ℝ (all pairs), ℝ³ = ℝ × ℝ × ℝ (all triples), ℝⁿ = ℝ × ℝ × ... × ℝ (n times).
+
+---
+
+## ML vs. Math Terminology
+
+The ML terminology is confusing because it uses "dimension" in a way that doesn't directly map to the math you learned.
+
+### The Math You Know
+
+| Rank | Name | Example | How many indices to address one element |
+|------|------|---------|----------------------------------------|
+| 0 | Scalar | `5` | None — it's just a number |
+| 1 | Vector | `[1, 3, 7]` | One: `v[2] = 7` |
+| 2 | Matrix | `[[1,2],[3,4]]` | Two: `m[1][0] = 3` |
+| 3+ | Tensor | 3D grid of numbers | Three+: `t[2][1][0]` |
+
+This is **tensor rank** (or order) — how many axes a data structure has.
+
+### What ML Calls "Dimensions"
+
+When ML people say "hidden dimension = 5,376", they're **not** talking about rank. They're talking about the **size along one axis** of a rank-1 or rank-2 tensor.
+
+In math terms:
+
+| ML term | What it actually is | Math description |
+|---------|-------------------|-----------------|
+| "Hidden dimension" = 5,376 | Size of a vector | A vector in **ℝ⁵³⁷⁶** — a 1D tensor with 5,376 components |
+| "Q projection" = 5,376 × 8,192 | A matrix | A rank-2 tensor, a linear map **ℝ⁵³⁷⁶ → ℝ⁸¹⁹²** |
+| "Embedding" = 262,144 × 5,376 | A matrix | A rank-2 tensor, a lookup table mapping token IDs to vectors in **ℝ⁵³⁷⁶** |
+
+### The Key Confusion
+
+In math, a vector `[1, 3, 7]` is **1-dimensional** (rank 1) but lives in **ℝ³** (a 3-dimensional space). These are two different uses of "dimension":
+
+- **Rank** = how many axes the tensor has (math dimension)
+- **Size** = how many elements along one axis (ML "dimension")
+
+ML people say "dimension" when they mean "size along an axis." A weight matrix of shape `[5376, 8192]` is:
+
+- **Rank 2** in math (it's a matrix)
+- Has **dimensions** 5,376 and 8,192 in ML speak (sizes of its two axes)
+- Contains **5,376 × 8,192 = 44M parameters** (individual scalars)
+
+### The Full Mapping
+
+| Math concept | Math term | ML term | Gemma 4 31B example |
+|-------------|-----------|---------|---------------------|
+| Single number | Scalar (rank 0) | Parameter / weight | `0.137` |
+| Ordered list of numbers | Vector (rank 1) | "Dimension" = axis size | Token embedding: 5,376 numbers per token |
+| Grid of numbers | Matrix (rank 2) | Weight matrix | Q projection: 5,376 × 8,192 numbers |
+| 3D+ grid of numbers | Tensor (rank 3+) | Weight tensor | Not used in this model |
+
+| ML phrase | What it actually means | Math description |
+|-----------|----------------------|-----------------|
+| "Hidden dimension = 5,376" | Size of the token vector | A vector in ℝ⁵³⁷⁶ |
+| "Q projection = 5,376 × 8,192" | A weight matrix | A linear map ℝ⁵³⁷⁶ → ℝ⁸¹⁹² |
+| "Embedding = 262,144 × 5,376" | A lookup table | Maps token IDs to vectors in ℝ⁵³⁷⁶ |
+| "Parameters = 44M" | Number of scalars in a weight matrix | 5,376 × 8,192 = 44,032,512 individual numbers |
+
+### Why It Matters
+
+- **Same dimensions → same parameter count** (architecture is fixed)
+- **Same parameter count → different file sizes** depending on quantization:
+  - FP16: 44M params × 2 bytes = 88 MB
+  - Q8: 44M params × 1 byte = 44 MB
+  - Q4: 44M params × 0.5 bytes = 22 MB
+
+The dimensions don't change with quantization — only the **precision of each parameter** changes. That's why Q8_0 and UD-Q8_K_XL have the same architecture (same dimensions, same parameter count of ~30.7B) but different file sizes (30.4 GB vs 32.6 GB) — some parameters are stored at higher precision.
+
+---
+
 ## Overview
 
 Gemma 4 31B is a 31-billion parameter multimodal (image-text-to-text) model from Google. Multiple quantized versions are available on HuggingFace from both **Google** (official) and **Unsloth** (community). This document catalogs all available quantization variants, their file sizes, and trade-offs.
