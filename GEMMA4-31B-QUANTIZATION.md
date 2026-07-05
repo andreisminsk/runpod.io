@@ -2,6 +2,132 @@
 
 > Last updated: July 2026
 
+## Family Overview
+
+The Gemma 4 31B models are Google's fourth-generation multimodal AI models, released March–June 2026. All variants are licensed under Apache 2.0.
+
+## Model Variants
+
+| Model | Format | Params | Precision | Est. Size | Task | Downloads | Likes |
+|---|---|---|---|---|---|---|---|
+| **gemma-4-31B** | Safetensors | 32.68B | BF16 (full) | ~65 GB | image-text-to-text | 1.4M | 426 |
+| **gemma-4-31B-it** | Safetensors | 32.68B | BF16 (full) | ~65 GB | image-text-to-text | 27.8M | 3,052 |
+| **gemma-4-31B-it-qat-w4a16-ct** | Safetensors (compressed-tensors) | 33.60B | W4A16 (QAT) | ~17 GB | image-text-to-text | 578K | 29 |
+| **gemma-4-31B-it-qat-q4_0-gguf** | GGUF | — | Q4_0 (QAT) | ~17 GB | image-text-to-text | 251K | 78 |
+| **gemma-4-31B-it-qat-q4_0-unquantized** | Safetensors | — | BF16 (QAT intermediate) | ~65 GB | — | — | — |
+| **gemma-4-31B-it-assistant** | Safetensors | 33.60B | BF16 | ~65 GB | any-to-any | 550K | 306 |
+
+### Key Differences
+
+- **Multimodal:** All 31B models accept images + text as input (vision-language models)
+- **`-it` (instruction-tuned):** Optimized for conversational/chat use — by far the most popular variant (27.8M downloads)
+- **`-assistant` variant:** Uses `gemma4_assistant` architecture, supports any-to-any generation (text + image output), created April 2026
+- **QAT (Quantization-Aware Training):** Models trained with quantization simulation, retaining better accuracy after quantization compared to post-training quantization methods
+
+## Architecture Details
+
+- **Base architecture (31B/31B-it):** `gemma4` — `Gemma4ForConditionalGeneration`
+- **Assistant variant:** `gemma4_assistant` — any-to-any (can generate both text and images)
+- **Model class:** `AutoModelForMultimodalLM` (safetensors variants), `AutoModel` (GGUF)
+- **Tokenizer:** Special tokens `<bos>`, `<eos>`, `<mask>`, `<pad>`, `<unk>` with Jinja chat templates
+
+## Notation Guide: ℝⁿ
+
+Throughout this document, **ℝⁿ** (read: "R-n" or "real n-space") denotes the set of all vectors with **n** real-number components.
+
+- **ℝ** = the set of all real numbers (…, -1.5, 0, 3.14, …)
+- **ℝ³** = all possible 3D vectors: `[x, y, z]` where x, y, z are real numbers
+- **ℝ⁵³⁷⁶** = all possible vectors with 5,376 real-number components
+
+When we say a token is "a vector in ℝ⁵³⁷⁶", it means each token is represented by a list of 5,376 real numbers. A weight matrix that maps ℝ⁵³⁷⁶ → ℝ⁸¹⁹² takes a 5,376-number vector as input and produces an 8,192-number vector as output — it's a function between two vector spaces.
+
+| Notation | Meaning | In this model |
+|----------|---------|---------------|
+| ℝ⁵³⁷⁶ | Vectors with 5,376 components | Token hidden states |
+| ℝ⁸¹⁹² | Vectors with 8,192 components | Query (Q) output space |
+| ℝ²¹⁵⁰⁴ | Vectors with 21,504 components | FFN intermediate space |
+| ℝ²⁶²¹⁴⁴ | Vectors with 262,144 components | Vocabulary (token ID) space |
+
+The superscript is the **dimension of the vector space** — how many numbers each vector contains. This is the math meaning of "dimension" (size of the space), not the tensor rank (number of axes).
+
+### Origin of the ℝⁿ Notation
+
+| Period | Development |
+|--------|-------------|
+| 1637 | Descartes invents Cartesian coordinates — the idea of ℝ² as a plane |
+| 1888 | Peano formally defines vector spaces and ℝⁿ |
+| 1930s–50s | Bourbaki group (French mathematicians) standardizes ℝⁿ notation in their textbooks |
+| 1960s | Blackboard bold ℝ (double-struck) appears on university chalkboards to distinguish the set ℝ from the variable R |
+| 1990s | LaTeX adopts `\mathbb{R}` for the symbol |
+
+- **ℝ** = the set of real numbers, from the German **"Reell"** (real). The double-struck style distinguishes it from a variable named R.
+- **The superscript ⁿ** = Cartesian product. ℝ² = ℝ × ℝ (all pairs), ℝ³ = ℝ × ℝ × ℝ (all triples), ℝⁿ = ℝ × ℝ × ... × ℝ (n times).
+
+---
+
+## How Transformers Work
+
+**Transformers** are the engine behind modern AI language models (like GPT, Claude, Gemma, etc.). Here's the core idea:
+
+### The Problem
+When reading a sentence, the meaning of a word depends on **context** — other words around it. Older models processed words one at a time, so they "forgot" early words by the time they reached the end.
+
+### The Solution: Attention
+Transformers use a mechanism called **self-attention**:
+
+- For every word, the model looks at **all other words** in the sentence simultaneously
+- It calculates how much each word should "pay attention" to every other word
+- This creates a weighted mix of context for each word
+
+Example: In *"The bank of the river"*, attention helps the model know "bank" relates to "river", not finance.
+
+### How It Works (Simplified)
+
+1. **Input** → Text is broken into tokens (words/subwords) and converted to numbers (embeddings) — each token becomes a vector in ℝ⁵³⁷⁶
+2. **Attention** → Each token asks: *"Which other tokens are relevant to me?"* and gathers information from them — this is the Q/K/V projection
+3. **Feed-Forward** → Each token is processed through a neural network (FFN) — projected into ℝ²¹⁵⁰⁴ then back to ℝ⁵³⁷⁶
+4. **Repeat** → Steps 2-3 repeat 60 times (called "layers"), building deeper understanding
+5. **Output** → The final representations predict the next token
+
+### Key Concepts
+
+| Concept | Simple Meaning | In Gemma 4 31B |
+|---------|---------------|----------------|
+| **Self-attention** | Every word looks at every other word to gather context | Q/K/V projections transform tokens, then attention scores determine relevance |
+| **Multi-head** | Do attention multiple times in parallel — each "head" focuses on different relationships | 32 query heads (sliding) or 32/4 heads (full), each operating in ℝ²⁵⁶ or ℝ⁵¹² |
+| **Grouped Query Attention** | Multiple Q heads share the same K/V heads, reducing memory | 32 Q heads share 16 KV heads (sliding) or 4 KV heads (full) |
+| **Sliding attention** | Each token only attends to nearby tokens (window of 1,024) | 50 of 60 layers — cheaper, captures local patterns (syntax, nearby words) |
+| **Full attention** | Each token attends to all other tokens in the entire sequence | 10 of 60 layers — expensive, captures long-range dependencies (variable references across pages) |
+| **Positional encoding** | Add "position tags" so the model knows word order | Proportional RoPE (p-RoPE) for full attention, standard RoPE for sliding |
+| **Layers** | Stack many attention+processing blocks for deeper understanding | 60 layers, each ~479M–534M parameters |
+| **FFN** | Per-token neural network that "processes" the gathered context | Projects ℝ⁵³⁷⁶ → ℝ²¹⁵⁰⁴ → ℝ⁵³⁷⁶ (4× expansion with gate) |
+
+### Why It's Powerful
+- **Parallelizable**: Unlike older sequential models, all tokens are processed at once → much faster training
+- **Long-range context**: Word 1 can directly attend to word 1000 — no information bottleneck
+- **Scalable**: Just add more layers, heads, and data → bigger model = better performance
+
+### One-Liner
+> A transformer is a model that lets every word "talk to" every other word to figure out meaning, then repeats this process many times to build deep understanding before predicting what comes next.
+
+### Gemma 4 31B's Hybrid Attention
+
+Gemma 4 31B uses a **hybrid attention** architecture — it interleaves two types of attention across its 60 layers:
+
+| | Sliding Attention | Full Attention |
+|---|---|---|
+| **How many tokens seen** | Last 1,024 tokens only | All tokens in the sequence |
+| **Cost** | O(n × window) | O(n²) |
+| **Good for** | Syntax, local context, nearby word relationships | Long-range reasoning, variable tracking across files |
+| **Layers** | 50 of 60 (layers 0-4, 6-10, 12-16, ...) | 10 of 60 (layers 5, 11, 17, 23, 29, 35, 41, 47, 53, 59) |
+| **KV heads** | 16 | 4 (unified K/V) |
+| **Head dimension** | 256 | 512 |
+| **RoPE type** | Standard | Proportional (p-RoPE) |
+
+By using sliding attention for 83% of layers and full attention only every 6th layer, Gemma 4 gets long-range understanding at a fraction of the compute cost. Information from distant tokens still flows through the full-attention layers like relay stations.
+
+---
+
 ## Model Dimensions
 
 | Dimension | Value | Math Description |
@@ -56,40 +182,6 @@ All learnable parameters in this model are rank ≤ 2:
 **No rank-3 or higher tensors exist in this model.** The largest matrix is the embedding at `[262,144 × 5,376]` containing 1.41B individual scalars. The maximum axis size (ML "dimension") is 262,144 (vocabulary size).
 
 > **Note:** Full attention layers use unified K/V projections (no separate V tensor) and 512-dim heads with 4 global KV heads, making Q and O projections 2× larger than sliding layers. This is why full attention layers have ~55M more parameters each.
-
----
-
-## Notation Guide: ℝⁿ
-
-Throughout this document, **ℝⁿ** (read: "R-n" or "real n-space") denotes the set of all vectors with **n** real-number components.
-
-- **ℝ** = the set of all real numbers (…, -1.5, 0, 3.14, …)
-- **ℝ³** = all possible 3D vectors: `[x, y, z]` where x, y, z are real numbers
-- **ℝ⁵³⁷⁶** = all possible vectors with 5,376 real-number components
-
-When we say a token is "a vector in ℝ⁵³⁷⁶", it means each token is represented by a list of 5,376 real numbers. A weight matrix that maps ℝ⁵³⁷⁶ → ℝ⁸¹⁹² takes a 5,376-number vector as input and produces an 8,192-number vector as output — it's a function between two vector spaces.
-
-| Notation | Meaning | In this model |
-|----------|---------|---------------|
-| ℝ⁵³⁷⁶ | Vectors with 5,376 components | Token hidden states |
-| ℝ⁸¹⁹² | Vectors with 8,192 components | Query (Q) output space |
-| ℝ²¹⁵⁰⁴ | Vectors with 21,504 components | FFN intermediate space |
-| ℝ²⁶²¹⁴⁴ | Vectors with 262,144 components | Vocabulary (token ID) space |
-
-The superscript is the **dimension of the vector space** — how many numbers each vector contains. This is the math meaning of "dimension" (size of the space), not the tensor rank (number of axes).
-
-### Origin of the ℝⁿ Notation
-
-| Period | Development |
-|--------|-------------|
-| 1637 | Descartes invents Cartesian coordinates — the idea of ℝ² as a plane |
-| 1888 | Peano formally defines vector spaces and ℝⁿ |
-| 1930s–50s | Bourbaki group (French mathematicians) standardizes ℝⁿ notation in their textbooks |
-| 1960s | Blackboard bold ℝ (double-struck) appears on university chalkboards to distinguish the set ℝ from the variable R |
-| 1990s | LaTeX adopts `\mathbb{R}` for the symbol |
-
-- **ℝ** = the set of real numbers, from the German **"Reell"** (real). The double-struck style distinguishes it from a variable named R.
-- **The superscript ⁿ** = Cartesian product. ℝ² = ℝ × ℝ (all pairs), ℝ³ = ℝ × ℝ × ℝ (all triples), ℝⁿ = ℝ × ℝ × ... × ℝ (n times).
 
 ---
 
@@ -459,6 +551,163 @@ Most models on HuggingFace are in **safetensors** format (the native HuggingFace
    ```
 
 > **Tip:** For fine-tuned adapters in safetensors format, you can create a Modelfile with a `FROM` command pointing to the base GGUF model and an `ADAPTER` command pointing to the adapter weights. See [Ollama Import Docs](https://docs.ollama.com/import).
+
+---
+
+## How This Model Works — End-to-End Inference
+
+This section walks through what happens when you send a prompt to Gemma 4 31B, from text to prediction, using the math language introduced earlier.
+
+### Step 1: Tokenization — Text → Numbers
+
+Your input text is chopped into **tokens** (words or subwords) and each token gets an integer ID from the vocabulary.
+
+```
+"Write a Python function" → [4288, 452, 14952, 3450]  (4 token IDs)
+```
+
+The vocabulary has 262,144 possible tokens. Each ID is just a number — an index into the embedding table.
+
+> **Math reference:** A list of integers — a rank-1 tensor (vector) in ℤ⁴ (4 integer components). Each component is a scalar (rank-0 tensor) indexing into the vocabulary space ℝ²⁶²¹⁴⁴.
+
+### Step 2: Embedding — Numbers → Vectors
+
+Each token ID is looked up in the **embedding matrix** (a rank-2 tensor of shape `[262,144 × 5,376]`). This converts the integer into a vector in ℝ⁵³⁷⁶ — a list of 5,376 real numbers that captures the token's meaning.
+
+```
+Token ID 4288 → vector [0.023, -0.137, 0.541, ...]  (5,376 numbers)
+Token ID 452  → vector [-0.089, 0.214, -0.033, ...]  (5,376 numbers)
+```
+
+At this point, each token is a point in ℝ⁵³⁷⁶ — a 5,376-dimensional space where similar words are close together.
+
+> **Math reference:** The embedding is a rank-2 tensor (matrix) — a linear map that takes an integer index and returns a vector in ℝ⁵³⁷⁶. It's a lookup table with 262,144 rows, each row being a rank-1 tensor (vector) with 5,376 components. The result for a sequence of N tokens is a rank-2 tensor of shape `[N × 5,376]`.
+
+### Step 3: Positional Encoding — Adding "Where" to "What"
+
+The embedding vectors don't know their position in the sentence. **RoPE** (Rotary Position Encoding) modifies the Q and K vectors so that tokens know *where* they are relative to each other. Sliding attention layers use standard RoPE; full attention layers use **p-RoPE** (Proportional RoPE) which scales better to long contexts.
+
+> **Math reference:** RoPE applies a rotation in ℝ² (pairs of dimensions) parameterized by position. Each pair of adjacent components in the Q and K vectors is rotated by an angle proportional to the token's position, so that dot(Q_i, K_j) naturally encodes relative distance |i - j|. This is a linear transformation in ℝ⁵³⁷⁶ that varies by position.
+
+### Step 4: 60 Layers of Processing — The Core
+
+Each of the 60 layers does two things: **attention** then **feed-forward**. The token vectors flow through all 60 layers sequentially, getting progressively refined.
+
+> **Math reference:** Each layer is a function f: ℝ⁵³⁷⁶ → ℝ⁵³⁷⁶ applied independently to each token's vector. The full 60-layer stack is a composition f₆₀ ∘ f₅₉ ∘ ... ∘ f₁, transforming the embedding into a representation rich enough to predict the next token.
+
+#### 4a. Attention — Tokens Talk to Each Other
+
+Each token creates three vectors by multiplying its current vector by three learned weight matrices:
+
+| Vector | How | Math |
+|--------|-----|------|
+| **Query (Q)** | "What am I looking for?" | Multiply vector in ℝ⁵³⁷⁶ by Q weight matrix → get vector in ℝ⁸¹⁹² (sliding) or ℝ¹⁶³⁸⁴ (full) |
+| **Key (K)** | "What do I contain?" | Multiply vector in ℝ⁵³⁷⁶ by K weight matrix → get vector in ℝ⁴⁰⁹⁶ (sliding) or ℝ²⁰⁴⁸ (full) |
+| **Value (V)** | "What information do I offer?" | Multiply vector in ℝ⁵³⁷⁶ by V weight matrix → get vector in ℝ⁴⁰⁹⁶ (sliding) or unified with K (full) |
+
+> **Math reference:** Each weight matrix is a rank-2 tensor — a linear map between vector spaces. Q weight: ℝ⁵³⁷⁶ → ℝ⁸¹⁹² (sliding) or ℝ⁵³⁷⁶ → ℝ¹⁶³⁸⁴ (full). The 32 attention heads split the output into 32 parallel subspaces of ℝ²⁵⁶ (or ℝ⁵¹² for full attention), each computing attention independently.
+
+Then each token's Q is compared against every other token's K to get **attention scores** — how much each token should listen to each other token. These scores weight the V vectors, producing a new context-rich vector for each token.
+
+**Sliding attention** (50 layers): Each token only compares its Q against K vectors from the last 1,024 tokens. Cheap and local.
+
+**Full attention** (10 layers): Each token compares its Q against *all* K vectors in the entire sequence. Expensive but captures long-range dependencies.
+
+The 32 attention heads each do this independently in their own ℝ²⁵⁶ (or ℝ⁵¹²) subspace, then the results are concatenated and projected back to ℝ⁵³⁷⁶ by the O (output) matrix.
+
+#### 4b. Feed-Forward Network — Processing the Context
+
+After attention has gathered context, each token is processed individually through the FFN:
+
+```
+Token vector in ℝ⁵³⁷⁶
+    → FFN up: multiply by [5376 × 21504] matrix → vector in ℝ²¹⁵⁰⁴  (expand)
+    → FFN gate: multiply by [5376 × 21504] matrix → vector in ℝ²¹⁵⁰⁴  (gate)
+    → multiply up × gate (element-wise, with activation)
+    → FFN down: multiply by [21504 × 5376] matrix → vector in ℝ⁵³⁷⁶  (compress back)
+```
+
+> **Math reference:** The FFN is a composition of three linear maps with a non-linear activation. Up: ℝ⁵³⁷⁶ → ℝ²¹⁵⁰⁴ (rank-2 tensor, 115.6M scalars). Gate: ℝ⁵³⁷⁶ → ℝ²¹⁵⁰⁴ (rank-2 tensor, 115.6M scalars). The element-wise product in ℝ²¹⁵⁰⁴ is a non-linear operation (no matrix, just pointwise multiplication). Down: ℝ²¹⁵⁰⁴ → ℝ⁵³⁷⁶ (rank-2 tensor, 115.6M scalars). Total: ~347M scalars per FFN per layer.
+
+The FFN expands each token from ℝ⁵³⁷⁶ into ℝ²¹⁵⁰⁴ (4× expansion), applies a non-linear activation, then compresses back to ℝ⁵³⁷⁶. This is where the model "thinks" about what it learned from attention — storing and retrieving knowledge.
+
+#### 4c. Layer Norm and Residual
+
+Each sub-layer (attention, FFN) is wrapped with:
+- **Residual connection**: input + output (helps gradients flow during training, preserves information)
+- **Layer norm**: normalizes the vector to keep values stable (a rank-1 tensor — a vector in ℝ⁵³⁷⁶ of learned scale factors)
+
+> **Math reference:** Residual: output = f(x) + x, a direct addition of two vectors in ℝ⁵³⁷⁶. Layer norm: a rank-1 tensor (vector of 5,376 learned scale factors) that normalizes each component. These are the smallest parameters in the model — only 5,376 scalars each, stored as F32 (full precision) in all quantization variants.
+
+### Step 5: Output Projection — Vectors → Next Token
+
+After all 60 layers, each token's final vector in ℝ⁵³⁷⁶ is multiplied by the **output projection matrix**. Since word embeddings are tied with the output layer, this is the same `[262,144 × 5,376]` embedding matrix transposed — it maps from ℝ⁵³⁷⁶ back to ℝ²⁶²¹⁴⁴ (vocabulary space).
+
+This produces a score for each of the 262,144 possible next tokens. The highest-scoring token (or a sampled one, depending on temperature) becomes the model's prediction.
+
+> **Math reference:** The output projection is a linear map ℝ⁵³⁷⁶ → ℝ²⁶²¹⁴⁴, implemented as multiplication by the transposed embedding matrix (rank-2 tensor of shape `[5,376 × 262,144]`). The result is a vector in ℝ²⁶²¹⁴⁴ — one scalar per vocabulary token. The argmax (or sampling) of this vector selects the next token, reducing a rank-1 tensor to a rank-0 tensor (a single integer).
+
+### Step 6: Autoregressive Generation — One Token at a Time
+
+The model predicts **one token at a time**. Each predicted token is appended to the input, and the whole process repeats:
+
+```
+Prompt:     "Write a Python"           → predict "function"
+Context:    "Write a Python function"   → predict "("
+Context:    "Write a Python function("  → predict "n"
+...and so on until a stop token is produced
+```
+
+This is why generation is slower than processing a prompt — each new token requires running through all 60 layers again. **KV caching** stores the K and V vectors from previous tokens so they don't need to be recomputed, but the new token still needs to attend to all previous tokens.
+
+### The Full Pipeline in One Picture
+
+```
+Input text: "Write a Python function"
+    │
+    ▼
+┌─────────────────────────┐
+│  Tokenizer              │  Text → token IDs [4288, 452, 14952, 3450]
+└─────────────────────────┘
+    │
+    ▼
+┌─────────────────────────┐
+│  Embedding [262144×5376]│  Each ID → vector in ℝ⁵³⁷⁶
+└─────────────────────────┘
+    │
+    ▼
+┌─────────────────────────┐
+│  Layer 1 (sliding)      │  Attention (window=1024) + FFN (5376→21504→5376)
+│  Layer 2 (sliding)      │  Attention + FFN
+│  ...                    │
+│  Layer 5 (FULL)         │  Attention (all tokens) + FFN  ← long-range context
+│  ...                    │
+│  Layer 59 (FULL)        │  Attention (all tokens) + FFN  ← final reasoning
+└─────────────────────────┘
+    │
+    ▼
+┌─────────────────────────┐
+│  Output projection      │  Vector in ℝ⁵³⁷⁶ → scores in ℝ²⁶²¹⁴⁴
+│  (tied embedding)       │  Pick highest-scoring token
+└─────────────────────────┘
+    │
+    ▼
+Next token: "function"
+```
+
+### Where Quantization Fits
+
+Quantization affects **Step 4** (the 60 layers) and **Step 2** (embedding). Each weight matrix is stored at reduced precision:
+
+| Step | What's stored | Q8_0 | UD-Q8_K_XL |
+|------|--------------|------|-------------|
+| Embedding | `[262144 × 5376]` matrix | Q8_0 (8-bit) | Q8_0 (8-bit) |
+| Q/K/V/O weights (most layers) | Various matrices | Q8_0 (8-bit) | Q8_0 (8-bit) |
+| Q/K/FFN weights (layers 1, 52-59) | Various matrices | Q8_0 (8-bit) | **F16 (16-bit)** |
+| Layer norms | Vectors in ℝ⁵³⁷⁶ | F32 (32-bit) | F32 (32-bit) |
+| Output projection | Same as embedding (tied) | Q8_0 (8-bit) | Q8_0 (8-bit) |
+
+The math is the same — vectors are still multiplied by matrices, projected between ℝⁿ spaces. Quantization just means each number in those matrices is stored with less precision (8 bits instead of 16 or 32), introducing small rounding errors that accumulate but barely affect output quality for Q8_0, and are mitigated in UD-Q8_K_XL by keeping the most critical layers at full F16 precision.
 
 ---
 
