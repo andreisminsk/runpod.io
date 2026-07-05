@@ -711,6 +711,70 @@ The math is the same — vectors are still multiplied by matrices, projected bet
 
 ---
 
+## Understanding CUDA
+
+**CUDA** (Compute Unified Device Architecture) is NVIDIA's platform for running general-purpose computations on GPUs. It's what makes a GPU do more than just render graphics — it lets you run AI models, scientific simulations, and parallel math on the GPU.
+
+### Why CUDA Matters Here
+
+When you run `llama-cli` with `-ngl 99` (offload 99 layers to GPU), it means: **"Move all model weights from system RAM to the NVIDIA GPU's VRAM, and run all computations on the GPU."**
+
+Without CUDA, you'd run the model on a CPU — which would be **50–100× slower** for transformer inference. An A100 processes tokens in milliseconds; a CPU would take seconds per token.
+
+### The CUDA Stack
+
+```
+Your command (llama-cli, ollama, python)
+      ↓
+llama.cpp / PyTorch          ← Inference engine
+      ↓
+CUDA Runtime                 ← C/C++ library on the GPU
+      ↓
+NVIDIA GPU Driver            ← Kernel-level driver
+      ↓
+NVIDIA GPU Hardware          ← The actual chip (A100, RTX 4090, etc.)
+```
+
+- **llama.cpp / PyTorch** provides the inference engine that understands GGUF/safetensors formats
+- **CUDA** translates operations (matrix multiplications, attention) into GPU instructions
+- The **GPU** executes thousands of math operations in parallel
+
+### Key Concepts
+
+**Parallelism:** A GPU has thousands of cores. CUDA splits work across them — e.g., computing all 5,376 components of a token vector simultaneously, or multiplying a `[5376 × 8192]` weight matrix across thousands of tokens at once. This is why GPUs dominate AI workloads.
+
+**VRAM (Video RAM):** The GPU's own memory, separate from system RAM. When you load a model with `-ngl 99`, model weights are copied from system RAM → VRAM. All computation then happens using VRAM. This is why quantization matters — Q8_0 needs ~30 GB VRAM for the 31B model, while Q4_0 needs ~16 GB.
+
+**Quantization and VRAM:** CUDA supports multiple numeric formats. The GGUF format stores weights in Q4/Q8/F16 etc., but during inference llama.cpp dequantizes them on-the-fly as the GPU computes. The stored format determines VRAM usage; the computation format determines speed.
+
+| Quantization | Weights stored as | VRAM needed (31B model) | Dequantized during compute? |
+|---|---|---|---|
+| Q4_0 | 4-bit integers | ~16 GB | Yes, to FP16 on GPU |
+| Q8_0 | 8-bit integers | ~30 GB | Yes, to FP16 on GPU |
+| UD-Q8_K_XL | Mix of 8-bit + F16 | ~33 GB | F16 layers stay as-is |
+| BF16 (full) | 16-bit floats | ~65 GB | No dequantization needed |
+
+### What Each Operation Uses
+
+| Operation | Where it runs | Why |
+|---|---|---|
+| Model loading (download GGUF) | CPU + system RAM | Downloads and deserializes weights |
+| `-ngl 99` (offload to GPU) | Copies weights to GPU VRAM | So inference runs on GPU |
+| Tokenization | CPU | Simple text processing, no GPU needed |
+| Embedding lookup | GPU via CUDA | Table lookup in `[262144 × 5376]` matrix |
+| Attention (Q/K/V projections) | GPU via CUDA | Matrix multiplications across all tokens |
+| Feed-forward network | GPU via CUDA | Matrix multiplications, 4× expansion |
+| Output projection | GPU via CUDA | Final `[5376 × 262144]` matrix multiply |
+| Sampling (temperature, top-k) | CPU | Simple probability operations on 262K values |
+
+### Without CUDA
+
+- `-ngl 99` → **error** if no NVIDIA GPU is present
+- You *can* run on CPU with `-ngl 0`, but generation would take **seconds per token** instead of milliseconds
+- There's no real alternative for production inference — AMD has ROCm, Apple has Metal, but the ecosystem (llama.cpp, PyTorch, Flash Attention) is CUDA-first
+
+---
+
 ## Links
 >>>>>>> REPLACE`
 
